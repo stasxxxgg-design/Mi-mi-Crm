@@ -2,10 +2,11 @@
  * Логирование каждого входящего апдейта Telegram.
  * Зависимости: grammy, logger.
  */
-import type { Context, NextFunction } from 'grammy';
+import type { NextFunction } from 'grammy';
 import { logger } from '../../core/logger.js';
+import type { BotContext } from '../types.js';
 
-export async function loggerMiddleware(ctx: Context, next: NextFunction): Promise<void> {
+export async function loggerMiddleware(ctx: BotContext, next: NextFunction): Promise<void> {
   const start = Date.now();
   logger.debug(
     {

@@ -10,14 +10,15 @@
  *
  * Зависимости: grammy, prisma, logger.
  */
-import type { Bot, CommandContext, Context } from 'grammy';
+import type { Bot, CommandContext } from 'grammy';
 import { prisma } from '../../core/db.js';
 import { logger } from '../../core/logger.js';
+import type { BotContext } from '../types.js';
 
 const MAX_SOURCE_CODE_LENGTH = 64; // защита от мусорного payload
 
-export function registerStartHandler(bot: Bot): void {
-  bot.command('start', async (ctx: CommandContext<Context>) => {
+export function registerStartHandler(bot: Bot<BotContext>): void {
+  bot.command('start', async (ctx: CommandContext<BotContext>) => {
     const from = ctx.from;
     if (!from) {
       logger.warn({ updateId: ctx.update.update_id }, '/start without from — skipping');
