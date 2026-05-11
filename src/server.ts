@@ -11,7 +11,23 @@ import { env } from './config/env.js';
 import { logger } from './core/logger.js';
 
 export async function createServer(): Promise<FastifyInstance> {
-  const app = Fastify({ loggerInstance: logger });
+  // Fastify v5 ужесточил типы logger'а — наш pino instance напрямую не подходит
+  // через `loggerInstance`. Для MVP отключаем встроенный логгер и логируем сами
+  // через onRequest/onResponse hooks. Реальная нагрузка на /health пренебрежима,
+  // request-логи пригодятся когда добавится /m/:token в дне 8+.
+  const app = Fastify({ logger: false });
+
+  app.addHook('onResponse', async (req, reply) => {
+    logger.debug(
+      {
+        method: req.method,
+        url: req.url,
+        status: reply.statusCode,
+        ms: reply.elapsedTime,
+      },
+      'http.response',
+    );
+  });
 
   app.get('/health', async () => ({ ok: true, ts: new Date().toISOString() }));
 

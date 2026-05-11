@@ -10,8 +10,9 @@ export async function loggerMiddleware(ctx: Context, next: NextFunction): Promis
   logger.debug(
     {
       updateId: ctx.update.update_id,
-      type: ctx.updateType,
       from: ctx.from?.username ?? ctx.from?.id,
+      hasMessage: ctx.message !== undefined,
+      hasCallback: ctx.callbackQuery !== undefined,
     },
     'Update received',
   );

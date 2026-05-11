@@ -7,6 +7,7 @@
  */
 import { env } from './config/env.js';
 import { logger } from './core/logger.js';
+import { prisma } from './core/db.js';
 import { redis, bullmqConnection } from './core/redis.js';
 import { createServer, startServer } from './server.js';
 import { createBot, startBot } from './bot/index.js';
@@ -25,6 +26,7 @@ async function bootstrap(): Promise<void> {
     try {
       await bot.stop();
       await app.close();
+      await prisma.$disconnect();
       redis.disconnect();
       bullmqConnection.disconnect();
     } catch (err) {

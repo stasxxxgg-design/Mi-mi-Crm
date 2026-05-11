@@ -1,0 +1,435 @@
+// MIMI Agency Bot — полная схема БД (PRD §11).
+// Принципы (PRD §2):
+//  - Карточка лида (LeadProfile) — центральная сущность, всё крутится вокруг неё.
+//  - Контент в БД, не в коде: Scenario / Step / MediaAsset / SurveyQuestion / Lesson.
+//  - FUTURE-таблицы (HomeworkAssignment, StreamReview, Revenue) — заложены, но НЕ
+//    используются в MVP. Кода под них в src/ быть не должно.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  // pg_trgm нужен для fuzzy-матчинга стран (PRD §6.2 / §5.5)
+  extensions = [pg_trgm]
+}
+
+// ========== CORE ==========
+
+model User {
+  id               String  @id @default(uuid())
+  telegramUserId   BigInt  @unique
+  telegramUsername String?
+  firstName        String?
+  lastName         String?
+
+  // На старте все сотрудники MIMI получают ADMIN; новые лиды — LEAD.
+  // OWNER/HR/MANAGER/STREAMER — заделы под будущее (PRD §10.4).
+  role Role @default(LEAD)
+
+  // Pre-emptive для будущей Discord-интеграции (PRD §14: пока не используем)
+  discordUserId String? @unique
+
+  deletedAt DateTime? // soft delete
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 1:1 — основной профиль для лидов/стримеров
+  leadProfile LeadProfile?
+
+  // Обратные связи для админа/менеджера
+  assignedLeads LeadProfile[]    @relation("AssignedManager")
+  taughtLessons LessonInstance[] @relation("Teacher")
+
+  @@index([telegramUsername])
+}
+
+enum Role {
+  LEAD // default для всех новых пользователей
+  ADMIN // используется в MVP для всей команды MIMI
+  OWNER // [FUTURE]
+  HR // [FUTURE]
+  MANAGER // [FUTURE]
+  STREAMER // [FUTURE]
+}
+
+// ========== LEAD / STREAMER PROFILE ==========
+
+model LeadProfile {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  // Источник лида из deep link (например "fb_oct2026")
+  sourceCode String?
+
+  // Динамические ответы на анкету. Состав зависит от текущей версии SurveyQuestion[].
+  // Структура: { "<question.key>": <answer> }
+  surveyAnswers Json @default("{}")
+
+  // Денормализация для быстрых фильтров (PRD §5.1):
+  // частые WHERE-клаузы по age/country/timezone не должны идти через JSON.
+  age      Int?
+  country  String?
+  timezone String  @default("Europe/Kyiv")
+
+  // Если страну не удалось нормализовать автоматически — флаг для админа (PRD §5.5)
+  countryNeedsReview Boolean @default(false)
+
+  // Заполняются админом отдельно от анкеты
+  birthPlace     String?
+  englishLevel   EnglishLevel?
+  tiktokUsername String?       @unique
+  adminNotes     String?       @db.Text
+
+  tags String[] @default([])
+
+  // Funnel state
+  phase  LeadPhase  @default(ENTERED)
+  status LeadStatus @default(ACTIVE)
+
+  // Streamer fields (заполняются после конверсии LEAD → STREAMER)
+  currentLessonNumber  Int       @default(0)
+  promotedToStreamerAt DateTime?
+
+  // Manager
+  assignedManagerId String?
+  assignedManager   User?     @relation("AssignedManager", fields: [assignedManagerId], references: [id])
+  assignedAt        DateTime?
+
+  // Текущая позиция в воронке/анкете (нужно для resume после рестарта бота)
+  currentScenarioId       String?
+  currentScenarioStepId   String?
+  currentSurveyQuestionId String?
+
+  // Связи
+  meetInvites          MeetInvite[]
+  lessonParticipations LessonParticipation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phase])
+  @@index([status])
+  @@index([country])
+  @@index([assignedManagerId])
+  @@index([currentLessonNumber])
+  @@index([sourceCode])
+  @@index([tags], type: Gin)
+  @@index([surveyAnswers], type: Gin)
+}
+
+enum EnglishLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+  FLUENT
+}
+
+enum LeadPhase {
+  ENTERED // только что зашёл
+  TASK_COMPLETED // прошёл анкету
+  MEET_INVITED // приглашён на интро-кал
+  MEET_ATTENDED // пришёл на интро
+  MEET_MISSED // не пришёл
+  STREAMER // переведён в стримера
+}
+
+enum LeadStatus {
+  ACTIVE
+  PAUSED
+  REJECTED
+  GHOSTED
+  ARCHIVED
+}
+
+// ========== COUNTRY / TIMEZONE ==========
+
+model Country {
+  id           String   @id @default(uuid())
+  name         String   @unique // каноническое: "Польша"
+  nameAliases  String[] // варианты написания: ["polska", "poland", "polsha"]
+  isoCode      String   @unique // "PL"
+  timezone     String // IANA: "Europe/Warsaw"
+  flagEmoji    String? // "🇵🇱"
+  isTopCountry Boolean  @default(false) // показывать ли в кнопочном списке
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([nameAliases], type: Gin)
+}
+
+// ========== SURVEY (динамическая анкета) ==========
+
+model SurveyQuestion {
+  id         String    @id @default(uuid())
+  scenarioId String? // null = глобальная анкета
+  scenario   Scenario? @relation(fields: [scenarioId], references: [id])
+
+  key      String // программный ключ: "age", "tt_experience" — попадает в LeadProfile.surveyAnswers
+  question String // текст для лида: "Сколько тебе лет?"
+  hint     String? // подсказка под вопросом
+
+  type       QuestionType
+  options    Json? // для CHOICE/MULTI_CHOICE: [{ label, value }]
+  validation Json? // для NUMBER: { min, max }; для TEXT: { maxLength }
+
+  isRequired Boolean @default(true)
+  isActive   Boolean @default(true)
+  order      Int
+
+  // Если true — применяется спец-логика страны (кнопки топ-стран + fuzzy match)
+  isCountryQuestion Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scenarioId, key])
+  @@index([scenarioId, order])
+}
+
+enum QuestionType {
+  NUMBER
+  TEXT
+  CHOICE
+  MULTI_CHOICE
+  BOOLEAN
+}
+
+// ========== SCENARIOS (CMS воронки) ==========
+
+model Scenario {
+  id          String  @id @default(uuid())
+  sourceCode  String  @unique
+  name        String
+  description String?
+  isActive    Boolean @default(true)
+  isDefault   Boolean @default(false)
+
+  steps           Step[]
+  surveyQuestions SurveyQuestion[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Step {
+  id                String      @id @default(uuid())
+  scenarioId        String
+  scenario          Scenario    @relation(fields: [scenarioId], references: [id])
+  order             Int
+  type              StepType
+  content           Json
+  mediaAssetId      String?
+  mediaAsset        MediaAsset? @relation(fields: [mediaAssetId], references: [id])
+  nextStepId        String?
+  delayAfterSeconds Int         @default(0)
+
+  @@unique([scenarioId, order])
+}
+
+enum StepType {
+  TEXT
+  PHOTO
+  VIDEO_NOTE
+  VOICE
+  BUTTONS
+  DELAY
+  SURVEY
+}
+
+model MediaAsset {
+  id               String         @id @default(uuid())
+  type             MediaAssetType
+  telegramFileId   String
+  description      String // "Кружок-приветствие от Маши"
+  uploadedByUserId String?
+  isActive         Boolean        @default(true)
+
+  steps Step[]
+
+  createdAt DateTime @default(now())
+}
+
+enum MediaAssetType {
+  VIDEO_NOTE
+  PHOTO
+  VOICE
+  VIDEO
+  DOCUMENT
+}
+
+// ========== INTRO CALLS ==========
+
+model IntroCall {
+  id          String          @id @default(uuid())
+  scheduledAt DateTime
+  meetUrl     String
+  description String?
+  status      IntroCallStatus @default(SCHEDULED)
+
+  invites MeetInvite[]
+
+  createdAt DateTime @default(now())
+}
+
+enum IntroCallStatus {
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+model MeetInvite {
+  id            String      @id @default(uuid())
+  token         String      @unique
+  introCallId   String
+  introCall     IntroCall   @relation(fields: [introCallId], references: [id])
+  leadProfileId String
+  leadProfile   LeadProfile @relation(fields: [leadProfileId], references: [id])
+
+  // Reminders state — чтобы не отправить дважды (PRD §7.3)
+  reminder1DaySentAt  DateTime?
+  reminder15MinSentAt DateTime?
+  reminder5MinSentAt  DateTime?
+
+  // Tracking
+  clickedAt DateTime?
+
+  // Attendance — заполняет админ вручную после созвона
+  attended Boolean?
+
+  createdAt DateTime @default(now())
+}
+
+// ========== LESSONS ==========
+
+model Lesson {
+  id          Int     @id // PRD §9.1: фиксированные номера 1-15
+  // ВАЖНО: id здесь = номер урока. На MVP это удобно: ссылки "Lesson 3" → id=3.
+  // Если потребуется развести "номер" и "uuid" — выделим uuid позже.
+  stage       Int // 1-4 (PRD §9.1)
+  title       String
+  description String? @db.Text
+
+  // Контент урока (PRD §9.1: текст/видео/доп. материалы)
+  videoUrl      String?
+  textContent   String? @db.Text // markdown
+  materialsJson Json? // фото/ссылки/допматериалы
+
+  // Recurring (для английского)
+  isRecurring        Boolean @default(false)
+  recurringDayOfWeek Int? // 0-6, 0=Sunday
+  recurringTime      String? // "18:00" (по Киеву)
+  recurringChannel   String? // "Discord #english"
+  recurringTeacherId String?
+
+  isActive Boolean @default(true)
+
+  instances LessonInstance[]
+}
+
+model LessonInstance {
+  id        String @id @default(uuid())
+  lessonId  Int
+  lesson    Lesson @relation(fields: [lessonId], references: [id])
+  teacherId String
+  teacher   User   @relation("Teacher", fields: [teacherId], references: [id])
+
+  scheduledAt DateTime
+  status      LessonInstanceStatus @default(SCHEDULED)
+
+  channelInfo String? // "Discord #lessons-stas"
+
+  managerNotes String? @db.Text // заметка после урока
+
+  // Reminders state
+  reminder24hSentAt   DateTime?
+  reminder1hSentAt    DateTime?
+  reminder15minSentAt DateTime?
+
+  participants LessonParticipation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum LessonInstanceStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  MISSED
+}
+
+model LessonParticipation {
+  id               String         @id @default(uuid())
+  lessonInstanceId String
+  lessonInstance   LessonInstance @relation(fields: [lessonInstanceId], references: [id])
+  leadProfileId    String
+  leadProfile      LeadProfile    @relation(fields: [leadProfileId], references: [id])
+
+  attended Boolean?
+
+  @@unique([lessonInstanceId, leadProfileId])
+}
+
+// ========== INFRASTRUCTURE ==========
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String // "lead_promoted", "scenario_updated"
+  entityType String?
+  entityId   String?
+  diff       Json?
+  createdAt  DateTime @default(now())
+}
+
+model FeatureFlag {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  enabled     Boolean  @default(false)
+  description String?
+  updatedAt   DateTime @updatedAt
+}
+
+// ========== [FUTURE] заделы под будущее ==========
+// На MVP не используются, кода под них в src/ быть не должно (PRD §11).
+
+model HomeworkAssignment {
+  id            String   @id @default(uuid())
+  leadProfileId String
+  assignedById  String
+  title         String
+  description   String   @db.Text
+  deadlineAt    DateTime
+  status        String   @default("ASSIGNED")
+  createdAt     DateTime @default(now())
+}
+
+model StreamReview {
+  id            String   @id @default(uuid())
+  leadProfileId String
+  managerId     String
+  streamDate    DateTime @db.Date
+  metrics       Json
+  comments      String   @db.Text
+  createdAt     DateTime @default(now())
+}
+
+model Revenue {
+  id             String   @id @default(uuid())
+  leadProfileId  String
+  weekStart      DateTime @db.Date
+  weekEnd        DateTime @db.Date
+  grossIncomeUsd Decimal  @db.Decimal(10, 2)
+  status         String   @default("PENDING")
+  notes          String?
+  createdAt      DateTime @default(now())
+}
