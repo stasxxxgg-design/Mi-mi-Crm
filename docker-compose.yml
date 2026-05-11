@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mimi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mimi
+      POSTGRES_PASSWORD: mimi
+      POSTGRES_DB: mimi_bot
+    ports:
+      - "5432:5432"
+    volumes:
+      - mimi-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mimi -d mimi_bot"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: mimi-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - mimi-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mimi-postgres-data:
+  mimi-redis-data:
