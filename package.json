@@ -19,6 +19,8 @@
     "prisma:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@grammyjs/conversations": "^2.1.1",
+    "@grammyjs/storage-redis": "^2.5.1",
     "@prisma/client": "^5.22.0",
     "bullmq": "^5.34.0",
     "date-fns": "^4.1.0",
