@@ -19,9 +19,15 @@
 import type { Prisma, PrismaClient, SurveyQuestion } from '@prisma/client';
 import { logger } from '../../core/logger.js';
 import {
+  logSurveyAnswered,
+  logSurveyCompleted,
+  logSurveyQuestionSkipped,
+} from '../audit/log.js';
+import {
   getFirstActiveQuestion,
   getNextActiveQuestion,
   getQuestionById,
+  listActiveGlobalQuestions,
   mergeSurveyAnswers,
 } from './repository.js';
 import { validateAnswer } from './validator.js';
@@ -86,6 +92,7 @@ export async function submitAnswer(
   if (result.kind === 'unsupported_type') {
     // Кривая конфигурация — не мучаем лида, скипаем вопрос.
     await mergeSurveyAnswers(prisma, leadProfileId, { [question.key]: null });
+    await logSurveyQuestionSkipped(prisma, profile, question, 'unsupported_question_type', 0);
     return advanceFromQuestion(prisma, leadProfileId, question.order);
   }
 
@@ -93,6 +100,7 @@ export async function submitAnswer(
     const attempts = profile.failedAttempts + 1;
     if (attempts >= MAX_ATTEMPTS) {
       await mergeSurveyAnswers(prisma, leadProfileId, { [question.key]: null });
+      await logSurveyQuestionSkipped(prisma, profile, question, 'max_attempts_exceeded', attempts);
       const advanced = await advanceFromQuestion(prisma, leadProfileId, question.order);
       const nextQuestion = advanced.kind === 'asked' ? advanced.question : null;
       return { kind: 'skipped_after_max', nextQuestion };
@@ -109,6 +117,8 @@ export async function submitAnswer(
     [question.key]: result.value as Prisma.JsonValue,
   });
   await denormalize(prisma, leadProfileId, question.key, result.value);
+  const attempt = profile.failedAttempts + 1;
+  await logSurveyAnswered(prisma, profile, question, result.value as Prisma.JsonValue, attempt);
   return advanceFromQuestion(prisma, leadProfileId, question.order);
 }
 
@@ -140,6 +150,13 @@ export async function advanceFromQuestion(
     // Unsupported тип — скипаем здесь же, не показывая юзеру.
     if (next.type === 'MULTI_CHOICE' || next.type === 'BOOLEAN') {
       await mergeSurveyAnswers(prisma, leadProfileId, { [next.key]: null });
+      const profile = await prisma.leadProfile.findUnique({
+        where: { id: leadProfileId },
+        select: { id: true, userId: true },
+      });
+      if (profile) {
+        await logSurveyQuestionSkipped(prisma, profile, next, 'unsupported_question_type', 0);
+      }
       order = next.order;
       skippedInARow += 1;
       if (skippedInARow > MAX_SKIPS_IN_ADVANCE) {
@@ -171,9 +188,11 @@ export async function advanceFromQuestion(
 export async function completeSurvey(prisma: PrismaClient, leadProfileId: string): Promise<void> {
   const profile = await prisma.leadProfile.findUnique({
     where: { id: leadProfileId },
-    select: { surveyAnswers: true },
+    select: { id: true, userId: true, surveyAnswers: true },
   });
-  const current = (profile?.surveyAnswers as Record<string, Prisma.JsonValue> | null) ?? {};
+  if (!profile) return;
+
+  const current = (profile.surveyAnswers as Record<string, Prisma.JsonValue> | null) ?? {};
   const cleaned = Object.fromEntries(Object.entries(current).filter(([k]) => !k.startsWith('_')));
 
   await prisma.leadProfile.update({
@@ -185,6 +204,9 @@ export async function completeSurvey(prisma: PrismaClient, leadProfileId: string
       surveyAnswers: cleaned as Prisma.InputJsonValue,
     },
   });
+
+  const total = (await listActiveGlobalQuestions(prisma)).length;
+  await logSurveyCompleted(prisma, profile, total);
 }
 
 /**

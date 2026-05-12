@@ -21,11 +21,18 @@
  *   { state: 'awaiting_text' | 'awaiting_confirm', pendingCountryId?, pendingAlias? }
  * Префикс `_` — служебный, эти ключи не показываем в админке.
  */
-import type { Country, LeadProfile, PrismaClient, SurveyQuestion } from '@prisma/client';
+import type { Country, LeadProfile, Prisma, PrismaClient, SurveyQuestion } from '@prisma/client';
 import { findCountryByIso } from '../timezones/resolver.js';
 import { fuzzyFindCountry, learnAlias } from '../timezones/fuzzy.js';
+import {
+  logSurveyAnswered,
+  logSurveyCountryRejected,
+  logSurveyQuestionSkipped,
+} from '../audit/log.js';
 import { getQuestionById, mergeSurveyAnswers, removeSurveyAnswerKey } from './repository.js';
 import { advanceFromQuestion, MAX_ATTEMPTS, type EngineResult } from './engine.js';
+
+type MatchedOn = 'button' | 'exact' | 'levenshtein' | 'trigram';
 
 const COUNTRY_FLOW_KEY = '_countryFlow';
 
@@ -33,6 +40,7 @@ type CountryFlowState = {
   state: 'awaiting_text' | 'awaiting_confirm';
   pendingCountryId?: string;
   pendingAlias?: string;
+  pendingMatchedOn?: 'levenshtein' | 'trigram';
 };
 
 export type CountryFlowResult =
@@ -63,7 +71,7 @@ export async function handleCountryPick(
 ): Promise<CountryFlowResult> {
   const country = await findCountryByIso(prisma, isoCode);
   if (!country) return { kind: 'unexpected', reason: 'unknown_iso' };
-  return saveCountryAndAdvance(prisma, leadProfileId, country);
+  return saveCountryAndAdvance(prisma, leadProfileId, country, 'button');
 }
 
 /** Лид нажал "Другое" — переключаемся в режим текстового ввода. */
@@ -95,16 +103,18 @@ export async function handleCountryText(
   const match = await fuzzyFindCountry(prisma, raw);
 
   if (match && match.matchedOn === 'exact') {
-    return saveCountryAndAdvance(prisma, leadProfileId, match.country);
+    return saveCountryAndAdvance(prisma, leadProfileId, match.country, 'exact');
   }
 
   if (match) {
-    // levenshtein или trigram — нужно подтверждение
+    // levenshtein или trigram — нужно подтверждение.
+    // Запоминаем matchedOn в стейте, чтобы при confirm записать его в audit.
     await mergeSurveyAnswers(prisma, leadProfileId, {
       [COUNTRY_FLOW_KEY]: {
         state: 'awaiting_confirm',
         pendingCountryId: match.country.id,
         pendingAlias: raw.trim().toLowerCase(),
+        pendingMatchedOn: match.matchedOn,
       },
     });
     return { kind: 'suggest', country: match.country, alias: raw.trim() };
@@ -140,7 +150,13 @@ export async function handleCountryConfirm(
   if (flow.pendingAlias) {
     await learnAlias(prisma, country.id, flow.pendingAlias);
   }
-  return saveCountryAndAdvance(prisma, leadProfileId, country);
+  return saveCountryAndAdvance(
+    prisma,
+    leadProfileId,
+    country,
+    flow.pendingMatchedOn ?? 'levenshtein',
+    flow.pendingAlias,
+  );
 }
 
 /** Лид нажал "Нет" — возвращаемся в режим текстового ввода без штрафа. */
@@ -148,6 +164,24 @@ export async function handleCountryReject(
   prisma: PrismaClient,
   leadProfileId: string,
 ): Promise<CountryFlowResult> {
+  const profile = await prisma.leadProfile.findUnique({ where: { id: leadProfileId } });
+  if (!profile) return { kind: 'unexpected', reason: 'profile_not_found' };
+
+  const flow = readFlow(profile);
+  const question = profile.currentSurveyQuestionId
+    ? await getQuestionById(prisma, profile.currentSurveyQuestionId)
+    : null;
+
+  if (question && flow?.pendingCountryId && flow.pendingAlias) {
+    await logSurveyCountryRejected(
+      prisma,
+      profile,
+      question,
+      flow.pendingCountryId,
+      flow.pendingAlias,
+    );
+  }
+
   await mergeSurveyAnswers(prisma, leadProfileId, {
     [COUNTRY_FLOW_KEY]: { state: 'awaiting_text' },
   });
@@ -168,6 +202,8 @@ async function saveCountryAndAdvance(
   prisma: PrismaClient,
   leadProfileId: string,
   country: Country,
+  matchedOn: MatchedOn,
+  alias?: string,
 ): Promise<CountryFlowResult> {
   const profile = await prisma.leadProfile.findUnique({ where: { id: leadProfileId } });
   if (!profile?.currentSurveyQuestionId) {
@@ -190,6 +226,14 @@ async function saveCountryAndAdvance(
     },
   });
 
+  const attempt = profile.failedAttempts + 1;
+  const extra: Record<string, Prisma.JsonValue> = {
+    matchedOn,
+    isoCode: country.isoCode,
+  };
+  if (alias) extra.alias = alias;
+  await logSurveyAnswered(prisma, profile, question, country.name, attempt, extra);
+
   const engineResult = await advanceFromQuestion(prisma, leadProfileId, question.order);
   return { kind: 'saved', country, engineResult };
 }
@@ -203,6 +247,9 @@ async function flagAndAdvance(
   // Не распознали страну, сохраняем как есть и поднимаем флаг для админа.
   // Timezone оставляем дефолтом — админ исправит и при правке заодно
   // подгонит timezone.
+  const profile = await prisma.leadProfile.findUnique({ where: { id: leadProfileId } });
+  if (!profile) return { kind: 'unexpected', reason: 'profile_not_found' };
+
   const trimmed = rawInput.trim();
   await mergeSurveyAnswers(prisma, leadProfileId, {
     [question.key]: trimmed || null,
@@ -216,6 +263,9 @@ async function flagAndAdvance(
       failedAttempts: 0,
     },
   });
+
+  await logSurveyQuestionSkipped(prisma, profile, question, 'country_not_recognized', MAX_ATTEMPTS);
+
   const engineResult = await advanceFromQuestion(prisma, leadProfileId, question.order);
   return { kind: 'flagged_for_review', engineResult };
 }
