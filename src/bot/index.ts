@@ -13,6 +13,7 @@ import { logger } from '../core/logger.js';
 import { loggerMiddleware } from './middlewares/logger.js';
 import { userMiddleware } from './middlewares/user.js';
 import { registerStartHandler } from './handlers/start.js';
+import { registerSurveyHandlers } from './handlers/lead/survey.js';
 import type { BotContext } from './types.js';
 
 export function createBot(): Bot<BotContext> {
@@ -21,7 +22,12 @@ export function createBot(): Bot<BotContext> {
   bot.use(loggerMiddleware);
   bot.use(userMiddleware);
 
+  // Порядок важен: commands и start идут первыми, чтобы /start не попал в
+  // message:text-обработчик survey. grammy command-хэндлеры останавливают
+  // chain по умолчанию (без next), так что они отрабатывают первыми и
+  // эксклюзивно.
   registerStartHandler(bot);
+  registerSurveyHandlers(bot);
 
   bot.catch((err) => {
     logger.error({ err: err.error, updateId: err.ctx.update.update_id }, 'Bot handler error');
