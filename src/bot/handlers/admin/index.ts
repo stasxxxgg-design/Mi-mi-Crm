@@ -17,6 +17,7 @@ import { registerEditSurveyConversation } from './survey-edit.js';
 import { registerReorderSurveyConversation } from './survey-reorder.js';
 import { registerWelcomeAdminHandlers } from './welcome.js';
 import { registerEditWelcomeTextConversation } from './welcome-edit-text.js';
+import { registerWelcomeVideoConversations } from './welcome-video.js';
 import type { BotContext } from '../../types.js';
 
 export function createAdminComposer(): Composer<BotContext> {
@@ -28,6 +29,7 @@ export function createAdminComposer(): Composer<BotContext> {
   registerEditSurveyConversation(composer);
   registerReorderSurveyConversation(composer);
   registerEditWelcomeTextConversation(composer);
+  registerWelcomeVideoConversations(composer);
   // Главное меню (/admin) + callback-роутинг по разделам.
   registerAdminMenuHandlers(composer);
   registerSurveyAdminHandlers(composer);

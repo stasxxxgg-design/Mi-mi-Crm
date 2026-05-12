@@ -21,6 +21,11 @@ import { Composer, InlineKeyboard } from 'grammy';
 import { prisma } from '../../../core/db.js';
 import type { BotContext } from '../../types.js';
 import { EDIT_WELCOME_TEXT_CONVERSATION_ID } from './welcome-edit-text.js';
+import {
+  DELETE_WELCOME_VIDEO_CONVERSATION_ID,
+  UPLOAD_WELCOME_VIDEO_CONVERSATION_ID,
+  sendVideoSubmenu,
+} from './welcome-video.js';
 
 const CALLBACK_PREFIX = 'welcome:';
 
@@ -103,8 +108,15 @@ export function registerWelcomeAdminHandlers(composer: Composer<BotContext>): vo
     const action = data.slice(CALLBACK_PREFIX.length);
 
     if (action === 'video') {
-      // TODO Day 4B Шаг 3: enter conversation для upload/replace/delete.
-      await ctx.reply('🎥 Управление кружком — Day 4B Шаг 3.');
+      await sendVideoSubmenu(ctx);
+      return;
+    }
+    if (action === 'video:upload') {
+      await ctx.conversation.enter(UPLOAD_WELCOME_VIDEO_CONVERSATION_ID);
+      return;
+    }
+    if (action === 'video:delete') {
+      await ctx.conversation.enter(DELETE_WELCOME_VIDEO_CONVERSATION_ID);
       return;
     }
     if (action.startsWith('text:')) {
