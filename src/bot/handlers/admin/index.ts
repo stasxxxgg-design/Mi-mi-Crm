@@ -10,14 +10,13 @@
  */
 import { Composer } from 'grammy';
 import { adminOnly } from '../../middlewares/admin.js';
+import { registerSurveyAdminHandlers } from './survey.js';
 import type { BotContext } from '../../types.js';
 
 export function createAdminComposer(): Composer<BotContext> {
   const composer = new Composer<BotContext>();
   composer.use(adminOnly);
-  // Команды добавляются в следующих шагах:
-  //   composer.command('survey', ...);
-  //   composer.use(createConversation(addSurveyConversation, 'addSurvey'));
-  //   ...
+  registerSurveyAdminHandlers(composer);
+  // Wizard'ы анкеты и команды сценариев добавятся в Шагах 3–6 + Day 4B.
   return composer;
 }

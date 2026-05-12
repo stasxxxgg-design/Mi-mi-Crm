@@ -19,6 +19,17 @@ export function listActiveGlobalQuestions(prisma: PrismaClient): Promise<SurveyQ
   });
 }
 
+/**
+ * Все глобальные вопросы — включая isActive=false (для админки /survey).
+ * Сортируем active'ные по order ASC, archived прицепляем после.
+ */
+export function listAllGlobalQuestions(prisma: PrismaClient): Promise<SurveyQuestion[]> {
+  return prisma.surveyQuestion.findMany({
+    where: { scenarioId: null },
+    orderBy: [{ isActive: 'desc' }, { order: 'asc' }],
+  });
+}
+
 export function getQuestionById(prisma: PrismaClient, id: string): Promise<SurveyQuestion | null> {
   return prisma.surveyQuestion.findUnique({ where: { id } });
 }
