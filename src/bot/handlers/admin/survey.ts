@@ -18,6 +18,7 @@ import { prisma } from '../../../core/db.js';
 import { listAllGlobalQuestions } from '../../../modules/survey/repository.js';
 import { ADD_SURVEY_CONVERSATION_ID } from './survey-add.js';
 import { EDIT_SURVEY_CONVERSATION_ID } from './survey-edit.js';
+import { REORDER_SURVEY_CONVERSATION_ID } from './survey-reorder.js';
 import type { BotContext } from '../../types.js';
 
 type ChoiceOption = { label: string; value: string };
@@ -49,10 +50,7 @@ export function registerSurveyAdminHandlers(composer: Composer<BotContext>): voi
       return;
     }
     if (action === 'reorder') {
-      // TODO Шаг 6: enter в reorder-conversation, пока — текстовая подсказка.
-      await ctx.reply('Используй команду <code>/survey_reorder</code> (скоро будет в виде wizard).', {
-        parse_mode: 'HTML',
-      });
+      await ctx.conversation.enter(REORDER_SURVEY_CONVERSATION_ID);
       return;
     }
     if (action.startsWith('open:')) {

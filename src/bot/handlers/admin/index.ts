@@ -13,6 +13,7 @@ import { adminOnly } from '../../middlewares/admin.js';
 import { registerSurveyAdminHandlers } from './survey.js';
 import { registerAddSurveyConversation } from './survey-add.js';
 import { registerEditSurveyConversation } from './survey-edit.js';
+import { registerReorderSurveyConversation } from './survey-reorder.js';
 import type { BotContext } from '../../types.js';
 
 export function createAdminComposer(): Composer<BotContext> {
@@ -22,7 +23,8 @@ export function createAdminComposer(): Composer<BotContext> {
   // ctx.conversation.enter() не найдёт wizard.
   registerAddSurveyConversation(composer);
   registerEditSurveyConversation(composer);
+  registerReorderSurveyConversation(composer);
   registerSurveyAdminHandlers(composer);
-  // /survey_remove + /survey_reorder и Day 4B — следующие шаги.
+  // Day 4B (CMS сценариев, /upload_media, welcome video note, delay-runner) — впереди.
   return composer;
 }
