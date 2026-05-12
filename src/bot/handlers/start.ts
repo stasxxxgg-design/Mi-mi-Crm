@@ -1,90 +1,110 @@
 /**
- * Обработчик /start. День 2 — подключение к БД (PRD §4):
- *   - findOrCreate User по telegramUserId
- *   - если новый лид (роль LEAD без LeadProfile) — создаём профиль
- *     с sourceCode из deep link и phase=ENTERED
- *   - админам не создаём LeadProfile (они сотрудники, не лиды)
+ * Обработчик /start. День 3 — полный flow по PRD §4:
+ *   - ADMIN              → служебное приветствие, без profile
+ *   - новый LEAD         → создаём LeadProfile + проигрываем дефолтный сценарий
+ *   - LEAD с активной анкетой → resume: отправляем текущий вопрос
+ *   - LEAD после анкеты  → благодарим, ждёт интро
+ *   - STREAMER (на будущее) → заглушка "ты уже в обучении"
  *
- * Воронка (welcome-кружок, анкета) подключается в днях 3-4, сейчас просто
- * вежливое приветствие и фиксация в БД.
+ * User-уровневый upsert делает userMiddleware, дублировать здесь не нужно.
+ * sourceCode из deep link применяем только при создании LeadProfile,
+ * на повторных /start не перезаписываем — первый источник важнее.
  *
- * Зависимости: grammy, prisma, logger.
+ * Зависимости: grammy, prisma, scenario handler, survey handler, repository, logger.
  */
 import type { Bot, CommandContext } from 'grammy';
 import { prisma } from '../../core/db.js';
 import { logger } from '../../core/logger.js';
+import { playScenario } from './lead/scenario.js';
+import { sendQuestion } from './lead/survey.js';
+import { getQuestionById } from '../../modules/survey/repository.js';
 import type { BotContext } from '../types.js';
 
-const MAX_SOURCE_CODE_LENGTH = 64; // защита от мусорного payload
+const MAX_SOURCE_CODE_LENGTH = 64;
 
 export function registerStartHandler(bot: Bot<BotContext>): void {
   bot.command('start', async (ctx: CommandContext<BotContext>) => {
-    const from = ctx.from;
-    if (!from) {
-      logger.warn({ updateId: ctx.update.update_id }, '/start without from — skipping');
+    if (!ctx.user) {
+      // userMiddleware не смог сделать upsert. Логирует он сам, тут просто молча выходим.
+      logger.warn({ updateId: ctx.update.update_id }, '/start without ctx.user');
       return;
     }
 
-    // ctx.match содержит payload после "/start " (например "fb_oct2026").
-    // Защищаемся от длинных строк и пустых значений.
     const rawPayload = typeof ctx.match === 'string' ? ctx.match.trim() : '';
-    const sourceCode = rawPayload && rawPayload.length <= MAX_SOURCE_CODE_LENGTH ? rawPayload : null;
-
-    const user = await prisma.user.upsert({
-      where: { telegramUserId: BigInt(from.id) },
-      update: {
-        telegramUsername: from.username ?? null,
-        firstName: from.first_name ?? null,
-        lastName: from.last_name ?? null,
-      },
-      create: {
-        telegramUserId: BigInt(from.id),
-        telegramUsername: from.username ?? null,
-        firstName: from.first_name ?? null,
-        lastName: from.last_name ?? null,
-        role: 'LEAD',
-      },
-      include: { leadProfile: true },
-    });
-
-    // Профиль создаём только лидам и только если ещё нет.
-    // Админам profile не нужен — они сотрудники команды.
-    let isNewLead = false;
-    if (user.role === 'LEAD' && !user.leadProfile) {
-      await prisma.leadProfile.create({
-        data: {
-          userId: user.id,
-          sourceCode,
-          phase: 'ENTERED',
-        },
-      });
-      isNewLead = true;
-    }
+    const sourceCode =
+      rawPayload && rawPayload.length <= MAX_SOURCE_CODE_LENGTH ? rawPayload : null;
 
     logger.info(
       {
-        telegramId: from.id,
-        username: from.username,
-        role: user.role,
+        telegramId: ctx.user.telegramUserId,
+        role: ctx.user.role,
         sourceCode,
-        isNewLead,
+        hasProfile: !!ctx.leadProfile,
       },
-      '/start handled',
+      '/start',
     );
 
-    if (user.role === 'ADMIN') {
+    if (ctx.user.role === 'ADMIN') {
       await ctx.reply('Привет, админ. Бот в разработке. Команды появятся в днях 5-7.');
       return;
     }
 
-    if (isNewLead) {
-      const intro = sourceCode
-        ? `Привет! Спасибо, что заглянула (источник: <b>${sourceCode}</b>).\n\nЯ бот агентства <b>MIMI</b>. Скоро здесь будут вопросы для знакомства.`
-        : 'Привет! Я бот агентства <b>MIMI</b>. Скоро здесь будут вопросы для знакомства.';
-      await ctx.reply(intro, { parse_mode: 'HTML' });
+    // С этого момента ctx.user.role === 'LEAD' (других ролей в MVP нет).
+
+    // Стример уже на обучении — анкета не нужна (PRD §8).
+    if (ctx.leadProfile?.phase === 'STREAMER') {
+      await ctx.reply('Привет! Ты уже в обучении.');
       return;
     }
 
-    await ctx.reply('С возвращением! Анкета и воронка ещё на стройке — скоро доделаем.');
+    // Новый лид — создаём профиль и запускаем сценарий.
+    if (!ctx.leadProfile) {
+      const profile = await prisma.leadProfile.create({
+        data: { userId: ctx.user.id, sourceCode, phase: 'ENTERED' },
+      });
+      await runDefaultScenario(ctx, profile.id);
+      return;
+    }
+
+    // Лид в активной анкете — продолжаем с текущего вопроса (без повторения welcome).
+    if (ctx.leadProfile.currentSurveyQuestionId) {
+      const question = await getQuestionById(prisma, ctx.leadProfile.currentSurveyQuestionId);
+      if (question) {
+        await ctx.reply('С возвращением! Продолжим с того места, где остановились.');
+        await sendQuestion(ctx, question);
+        return;
+      }
+      // Вопрос внезапно исчез (админ удалил из анкеты) — даём фоллбек: проиграть сценарий заново.
+      logger.warn(
+        { leadProfileId: ctx.leadProfile.id, questionId: ctx.leadProfile.currentSurveyQuestionId },
+        'currentSurveyQuestionId points to missing question — replaying scenario',
+      );
+      await runDefaultScenario(ctx, ctx.leadProfile.id);
+      return;
+    }
+
+    // Лид уже прошёл анкету / приглашён / был на интро — благодарим и ждём.
+    if (ctx.leadProfile.phase !== 'ENTERED') {
+      await ctx.reply(
+        'Спасибо, ты уже прошла анкету. В ближайшее время менеджер пришлёт ссылку на интро-кал.',
+      );
+      return;
+    }
+
+    // ENTERED без активного вопроса — редкое состояние (например, бот упал между
+    // welcome-шагами и стартом анкеты). Безопасно: проиграть сценарий заново.
+    await runDefaultScenario(ctx, ctx.leadProfile.id);
   });
+}
+
+async function runDefaultScenario(ctx: BotContext, leadProfileId: string): Promise<void> {
+  const scenario = await prisma.scenario.findFirst({
+    where: { isDefault: true, isActive: true },
+  });
+  if (!scenario) {
+    logger.error('No default scenario found — check seed-scenarios');
+    await ctx.reply('Привет! Я получил твою заявку — скоро менеджер свяжется с тобой.');
+    return;
+  }
+  await playScenario(prisma, ctx, scenario.id, leadProfileId);
 }
