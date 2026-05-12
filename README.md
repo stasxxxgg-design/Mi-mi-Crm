@@ -49,18 +49,48 @@ Node 22 · TypeScript · Fastify · grammY · PostgreSQL · Prisma · Redis · B
 ## Структура (текущее состояние)
 
 ```
+prisma/
+├── schema.prisma                  # полная схема по PRD §11 (pg_trgm + fuzzystrmatch)
+├── migrations/                    # init + day3_survey_state + enable_fuzzystrmatch
+└── seed.ts                        # orchestrator
+
+scripts/
+├── seed-countries.ts              # 20 стран с aliases / TZ / flag
+├── seed-survey.ts                 # 4 дефолтных вопроса
+├── seed-lessons.ts                # 15 уроков (1-15)
+├── seed-scenarios.ts              # default scenario: 2 TEXT + SURVEY-маркер
+└── set-admin.ts                   # первый ADMIN из env
+
 src/
-├── index.ts              # entry: bootstrap()
-├── server.ts             # Fastify + /health
-├── config/env.ts         # zod-валидация .env
+├── index.ts                       # entry: bootstrap()
+├── server.ts                      # Fastify + /health
+├── config/env.ts                  # zod-валидация .env
 ├── core/
-│   ├── logger.ts         # pino
-│   ├── redis.ts          # default + bullmq-клиенты
-│   └── queue.ts          # BullMQ connection
+│   ├── logger.ts                  # pino
+│   ├── db.ts                      # PrismaClient singleton
+│   ├── redis.ts                   # default + bullmq-клиенты
+│   └── queue.ts                   # BullMQ connection
+├── modules/
+│   ├── audit/log.ts               # funnel-events в AuditLog
+│   ├── survey/
+│   │   ├── repository.ts          # доступ к SurveyQuestion + JSON-мерж
+│   │   ├── validator.ts           # NUMBER/CHOICE/TEXT
+│   │   ├── engine.ts              # стейт-машина (failedAttempts, advance)
+│   │   └── country.ts             # UI flow страны: pick/other/text/confirm/reject
+│   └── timezones/
+│       ├── resolver.ts            # exact-match по name/aliases
+│       └── fuzzy.ts               # каскад exact → Levenshtein → trigram
 └── bot/
-    ├── index.ts          # grammY Bot factory
-    ├── middlewares/logger.ts
-    └── handlers/start.ts
+    ├── index.ts                   # grammY Bot factory
+    ├── types.ts                   # BotContext с user + leadProfile
+    ├── middlewares/
+    │   ├── logger.ts
+    │   └── user.ts                # upsert User + LeadProfile
+    └── handlers/
+        ├── start.ts               # /start: ADMIN / new lead / resume / completed / streamer
+        └── lead/
+            ├── scenario.ts        # playScenario: TEXT-шаги + SURVEY-маркер
+            └── survey.ts          # рендер вопроса + callback/text диспатчер
 ```
 
 Полная целевая структура — см. § 12 PRD.
@@ -69,7 +99,8 @@ src/
 
 - [x] **День 1** — setup, Docker Compose, базовый бот в polling
 - [x] **День 2** — Prisma schema, миграция, seeds (20 стран, 4 вопроса анкеты, 15 уроков, первый ADMIN), `/start` пишет в БД
-- [ ] **День 3-4** — воронка + динамическая анкета + CMS
+- [x] **День 3** — движок анкеты + страны с fuzzy match (Levenshtein + trigram), audit log, e2e smoke на 11 сценариев
+- [ ] **День 4** — CMS воронки + админ-команды анкеты (/survey_*, /scenarios, /upload_media, welcome-кружок)
 - [ ] **День 5-7** — база лидов с поиском
 - [ ] **День 8-10** — интро-калы и tracking
 - [ ] **День 11-14** — уроки и расписание
