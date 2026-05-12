@@ -17,6 +17,7 @@ import { prisma } from '../../core/db.js';
 import { logger } from '../../core/logger.js';
 import { playScenario } from './lead/scenario.js';
 import { sendQuestion } from './lead/survey.js';
+import { sendAdminMenu } from './admin/menu.js';
 import { getQuestionById } from '../../modules/survey/repository.js';
 import type { BotContext } from '../types.js';
 
@@ -45,7 +46,7 @@ export function registerStartHandler(bot: Bot<BotContext>): void {
     );
 
     if (ctx.user.role === 'ADMIN') {
-      await ctx.reply('Привет, админ. Бот в разработке. Команды появятся в днях 5-7.');
+      await sendAdminMenu(ctx);
       return;
     }
 

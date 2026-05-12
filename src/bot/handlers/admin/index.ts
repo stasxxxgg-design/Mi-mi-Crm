@@ -10,6 +10,7 @@
  */
 import { Composer } from 'grammy';
 import { adminOnly } from '../../middlewares/admin.js';
+import { registerAdminMenuHandlers } from './menu.js';
 import { registerSurveyAdminHandlers } from './survey.js';
 import { registerAddSurveyConversation } from './survey-add.js';
 import { registerEditSurveyConversation } from './survey-edit.js';
@@ -24,6 +25,8 @@ export function createAdminComposer(): Composer<BotContext> {
   registerAddSurveyConversation(composer);
   registerEditSurveyConversation(composer);
   registerReorderSurveyConversation(composer);
+  // Главное меню (/admin) + callback-роутинг по разделам.
+  registerAdminMenuHandlers(composer);
   registerSurveyAdminHandlers(composer);
   // Day 4B (CMS сценариев, /upload_media, welcome video note, delay-runner) — впереди.
   return composer;

@@ -65,7 +65,7 @@ export function registerSurveyAdminHandlers(composer: Composer<BotContext>): voi
 
 // ============ panel ============
 
-async function sendSurveyPanel(ctx: BotContext): Promise<void> {
+export async function sendSurveyPanel(ctx: BotContext): Promise<void> {
   const questions = await listAllGlobalQuestions(prisma);
   const active = questions.filter((q) => q.isActive);
   const archived = questions.filter((q) => !q.isActive);
