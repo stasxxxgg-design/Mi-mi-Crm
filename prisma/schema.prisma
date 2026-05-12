@@ -13,8 +13,11 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  // pg_trgm нужен для fuzzy-матчинга стран (PRD §6.2 / §5.5)
-  extensions = [pg_trgm]
+  // pg_trgm + fuzzystrmatch — каскадный fuzzy-матчинг стран (PRD §5.5 / §6.2):
+  //   pg_trgm даёт similarity 0..1 — хорош для длинных вариаций (kazakhstan↔казахстан),
+  //   fuzzystrmatch.levenshtein — едит. расстояние, точно ловит опечатки в коротких словах
+  //   (казакстан↔казахстан = 1, тогда как pg_trgm даёт лишь 0.54).
+  extensions = [pg_trgm, fuzzystrmatch]
 }
 
 // ========== CORE ==========
