@@ -3,11 +3,14 @@
  * Зависимости: grammy, BotContext, sendSurveyPanel.
  *
  * Точка входа для админа после /start. Кнопки ведут в разделы:
- *   - 📋 Анкета — реализовано, открывает /survey
- *   - 🎬 Сценарии — Day 4B (заглушка)
- *   - 🎥 Медиа — Day 4B (заглушка)
- *   - 👤 Лиды — Day 5-7 (заглушка)
- *   - 👥 Команда — Day 10+ (заглушка)
+ *   - 📋 Анкета     — реализовано, открывает /survey
+ *   - 👋 Приветствие — Day 4B (welcome-тексты + кружок Маши, заглушка)
+ *   - 👤 Лиды       — Day 5-7 (заглушка)
+ *   - 👥 Команда    — Day 10+ (заглушка)
+ *
+ * "Сценарии" и "Медиа" как отдельные разделы убраны — на этапе MVP админу
+ * нужно настраивать конкретные вещи (приветствие, анкету), а не абстрактные
+ * scenarios/MediaAsset из БД.
  *
  * Callback namespace `admin_menu:*` чтобы не конфликтовать с survey_admin:*
  * и edit:* / wiz:*.
@@ -21,11 +24,9 @@ const CALLBACK_PREFIX = 'admin_menu:';
 export async function sendAdminMenu(ctx: BotContext): Promise<void> {
   const kb = new InlineKeyboard()
     .text('📋 Анкета', `${CALLBACK_PREFIX}survey`)
-    .text('🎬 Сценарии', `${CALLBACK_PREFIX}scenarios`)
+    .text('👋 Приветствие', `${CALLBACK_PREFIX}welcome`)
     .row()
-    .text('🎥 Медиа', `${CALLBACK_PREFIX}media`)
     .text('👤 Лиды', `${CALLBACK_PREFIX}leads`)
-    .row()
     .text('👥 Команда', `${CALLBACK_PREFIX}team`);
 
   await ctx.reply('<b>👋 Привет, админ.</b>\n\nЧто будем делать?', {
@@ -52,12 +53,11 @@ export function registerAdminMenuHandlers(composer: Composer<BotContext>): void 
       await sendSurveyPanel(ctx);
       return;
     }
-    if (section === 'scenarios') {
-      await ctx.reply('🎬 <b>Сценарии</b>\n\n<i>Скоро в Day 4B.</i>', { parse_mode: 'HTML' });
-      return;
-    }
-    if (section === 'media') {
-      await ctx.reply('🎥 <b>Медиа</b>\n\n<i>Скоро в Day 4B.</i>', { parse_mode: 'HTML' });
+    if (section === 'welcome') {
+      await ctx.reply(
+        '👋 <b>Приветствие</b>\n\n<i>Тексты приветствия и welcome-кружок Маши — скоро в Day 4B.</i>',
+        { parse_mode: 'HTML' },
+      );
       return;
     }
     if (section === 'leads') {
