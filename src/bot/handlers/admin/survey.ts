@@ -16,6 +16,7 @@ import { Composer, InlineKeyboard } from 'grammy';
 import type { SurveyQuestion } from '@prisma/client';
 import { prisma } from '../../../core/db.js';
 import { listAllGlobalQuestions } from '../../../modules/survey/repository.js';
+import { ADD_SURVEY_CONVERSATION_ID } from './survey-add.js';
 import type { BotContext } from '../../types.js';
 
 // Telegram HTML понимает & < > — этого достаточно для парсинга.
@@ -66,10 +67,11 @@ export function registerSurveyAdminHandlers(composer: Composer<BotContext>): voi
 
     const action = data.slice(CALLBACK_PREFIX.length);
     if (action === 'add') {
-      await ctx.reply('Используй команду <code>/survey_add</code>.', { parse_mode: 'HTML' });
+      await ctx.conversation.enter(ADD_SURVEY_CONVERSATION_ID);
       return;
     }
     if (action === 'reorder') {
+      // TODO Шаг 6: enter в reorder-conversation, пока — текстовая подсказка.
       await ctx.reply('Используй команду <code>/survey_reorder</code>.', { parse_mode: 'HTML' });
       return;
     }
