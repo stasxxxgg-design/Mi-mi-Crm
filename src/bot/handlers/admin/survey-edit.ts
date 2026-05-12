@@ -56,10 +56,17 @@ type MenuAction =
   | 'done'
   | 'cancel';
 
+/**
+ * focus='archive' — захардкоженный shortcut для /survey_remove: открывает
+ * вопрос и сразу запускает archive flow, минуя меню. После завершения
+ * (успех или отмена) выходим — иначе UX странный, пользователь хотел
+ * именно удалить, а попал в общий редактор.
+ */
 async function wizard(
   conversation: WizardConversation,
   ctx: BotContext,
   key: string,
+  focus?: 'archive',
 ): Promise<void> {
   let q = await conversation.external(() =>
     prisma.surveyQuestion.findFirst({ where: { scenarioId: null, key } }),
@@ -69,6 +76,19 @@ async function wizard(
       `Вопроса <code>${escapeHtml(key)}</code> не нашёл. Используй /survey для списка.`,
       { parse_mode: 'HTML' },
     );
+    return;
+  }
+
+  if (focus === 'archive') {
+    try {
+      await archive(conversation, ctx, q);
+    } catch (err) {
+      if (err instanceof CancelError) {
+        await ctx.reply('Архивирование отменено.');
+        return;
+      }
+      throw err;
+    }
     return;
   }
 
@@ -383,6 +403,7 @@ async function restore(
 
 export function registerEditSurveyConversation(composer: Composer<BotContext>): void {
   composer.use(createConversation(wizard, EDIT_SURVEY_CONVERSATION_ID));
+
   composer.command('survey_edit', async (ctx) => {
     const key = (typeof ctx.match === 'string' ? ctx.match : '').trim();
     if (!key) {
@@ -393,5 +414,19 @@ export function registerEditSurveyConversation(composer: Composer<BotContext>): 
       return;
     }
     await ctx.conversation.enter(EDIT_SURVEY_CONVERSATION_ID, key);
+  });
+
+  // Shortcut на archive: тот же wizard, но focus='archive' — сразу
+  // в подтверждение, без меню. UI-эквивалент кнопки 📦 в /survey_edit.
+  composer.command('survey_remove', async (ctx) => {
+    const key = (typeof ctx.match === 'string' ? ctx.match : '').trim();
+    if (!key) {
+      await ctx.reply(
+        'Использование: <code>/survey_remove &lt;key&gt;</code>\n\nИли открой /survey, нажми вопрос и выбери 📦 Архивировать.',
+        { parse_mode: 'HTML' },
+      );
+      return;
+    }
+    await ctx.conversation.enter(EDIT_SURVEY_CONVERSATION_ID, key, 'archive');
   });
 }
