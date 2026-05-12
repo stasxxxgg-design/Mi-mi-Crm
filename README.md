@@ -81,16 +81,25 @@ src/
 │       ├── resolver.ts            # exact-match по name/aliases
 │       └── fuzzy.ts               # каскад exact → Levenshtein → trigram
 └── bot/
-    ├── index.ts                   # grammY Bot factory
-    ├── types.ts                   # BotContext с user + leadProfile
+    ├── index.ts                   # grammY Bot factory + session + conversations
+    ├── types.ts                   # BotContext с user + leadProfile + session + conversation
     ├── middlewares/
     │   ├── logger.ts
-    │   └── user.ts                # upsert User + LeadProfile
+    │   ├── user.ts                # upsert User + LeadProfile
+    │   └── admin.ts               # adminOnly guard
     └── handlers/
-        ├── start.ts               # /start: ADMIN / new lead / resume / completed / streamer
-        └── lead/
-            ├── scenario.ts        # playScenario: TEXT-шаги + SURVEY-маркер
-            └── survey.ts          # рендер вопроса + callback/text диспатчер
+        ├── start.ts               # /start: ADMIN → admin menu / lead → scenario+survey
+        ├── lead/
+        │   ├── scenario.ts        # playScenario: TEXT-шаги + SURVEY-маркер
+        │   └── survey.ts          # рендер вопроса + callback/text диспатчер
+        └── admin/
+            ├── index.ts           # composer с adminOnly
+            ├── menu.ts            # главное меню (/admin или /start ADMIN)
+            ├── survey.ts          # /survey panel (per-question кнопки)
+            ├── survey-add.ts      # 10-шаговый wizard добавления
+            ├── survey-edit.ts     # меню действий + edit + archive/restore
+            ├── survey-reorder.ts  # порядок через keys, two-phase update
+            └── _wizard-common.ts  # общие ask* helpers + CancelError
 ```
 
 Полная целевая структура — см. § 12 PRD.
@@ -100,7 +109,8 @@ src/
 - [x] **День 1** — setup, Docker Compose, базовый бот в polling
 - [x] **День 2** — Prisma schema, миграция, seeds (20 стран, 4 вопроса анкеты, 15 уроков, первый ADMIN), `/start` пишет в БД
 - [x] **День 3** — движок анкеты + страны с fuzzy match (Levenshtein + trigram), audit log, e2e smoke на 11 сценариев
-- [ ] **День 4** — CMS воронки + админ-команды анкеты (/survey_*, /scenarios, /upload_media, welcome-кружок)
+- [x] **День 4A** — админ-меню анкеты через @grammyjs/conversations: /survey (panel с кнопками per-question) + /survey_add (10-шаговый wizard) + /survey_edit (меню действий: текст/подсказка/тип/варианты/валидация/обязательность/порядок/country/архивация-восстановление) + /survey_remove + /survey_reorder (two-phase update)
+- [ ] **День 4B** — CMS сценариев, /upload_media, welcome-кружок, BullMQ delay-runner
 - [ ] **День 5-7** — база лидов с поиском
 - [ ] **День 8-10** — интро-калы и tracking
 - [ ] **День 11-14** — уроки и расписание
