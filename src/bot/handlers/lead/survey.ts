@@ -108,7 +108,8 @@ export function registerSurveyHandlers(bot: Bot<BotContext>): void {
     const action = parts[2];
 
     if (namespace === 'choice') {
-      const value = parts[4] ?? '';
+      // Формат: survey:choice:<questionKey>:<value> → parts[3] = value.
+      const value = parts[3] ?? '';
       const result = await submitAnswer(prisma, ctx.leadProfile.id, value);
       await reportEngineResult(ctx, result);
       return;
@@ -197,6 +198,15 @@ async function reportEngineResult(ctx: BotContext, result: EngineResult): Promis
       await sendCompletionMessage(ctx);
       return;
     case 'unexpected':
+      // Текст на country-вопросе до нажатия "Другое" — engine.submitAnswer
+      // не валидирует isCountryQuestion, возвращает unexpected. Сообщаем лиду
+      // как правильно отвечать, чтобы не оставлять silent-fail.
+      if (result.reason === 'country_should_be_dispatched_to_country_flow') {
+        await ctx.reply(
+          'Выбери страну кнопкой или нажми <b>Другое…</b>, чтобы написать её текстом.',
+          { parse_mode: 'HTML' },
+        );
+      }
       logger.warn({ reason: result.reason }, 'Unexpected engine result');
       return;
   }
