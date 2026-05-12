@@ -93,13 +93,16 @@ src/
         │   ├── scenario.ts        # playScenario: TEXT-шаги + SURVEY-маркер
         │   └── survey.ts          # рендер вопроса + callback/text диспатчер
         └── admin/
-            ├── index.ts           # composer с adminOnly
-            ├── menu.ts            # главное меню (/admin или /start ADMIN)
-            ├── survey.ts          # /survey panel (per-question кнопки)
-            ├── survey-add.ts      # 10-шаговый wizard добавления
-            ├── survey-edit.ts     # меню действий + edit + archive/restore
-            ├── survey-reorder.ts  # порядок через keys, two-phase update
-            └── _wizard-common.ts  # общие ask* helpers + CancelError
+            ├── index.ts             # composer с adminOnly
+            ├── menu.ts              # главное меню (/admin или /start ADMIN)
+            ├── survey.ts            # /survey panel (per-question кнопки)
+            ├── survey-add.ts        # 10-шаговый wizard добавления
+            ├── survey-edit.ts       # меню действий + edit + archive/restore
+            ├── survey-reorder.ts    # порядок через keys, two-phase update
+            ├── welcome.ts           # раздел "Приветствие": панель + роутинг
+            ├── welcome-edit-text.ts # редактирование одного TEXT-шага
+            ├── welcome-video.ts     # кружок Маши: upload / replace / delete
+            └── _wizard-common.ts    # общие ask* helpers + CancelError
 ```
 
 Полная целевая структура — см. § 12 PRD.
@@ -110,7 +113,7 @@ src/
 - [x] **День 2** — Prisma schema, миграция, seeds (20 стран, 4 вопроса анкеты, 15 уроков, первый ADMIN), `/start` пишет в БД
 - [x] **День 3** — движок анкеты + страны с fuzzy match (Levenshtein + trigram), audit log, e2e smoke на 11 сценариев
 - [x] **День 4A** — админ-меню анкеты через @grammyjs/conversations: /survey (panel с кнопками per-question) + /survey_add (10-шаговый wizard) + /survey_edit (меню действий: текст/подсказка/тип/варианты/валидация/обязательность/порядок/country/архивация-восстановление) + /survey_remove + /survey_reorder (two-phase update)
-- [ ] **День 4B** — раздел «Приветствие» (welcome-тексты + кружок Маши) + BullMQ delay-runner для шагов
+- [x] **День 4B** — раздел «Приветствие»: панель статуса + редактирование TEXT-шагов + welcome-кружок (upload/replace/delete с two-phase reordering) + рендер VIDEO_NOTE в playScenario
 - [ ] **День 5-7** — база лидов с поиском
 - [ ] **День 8-10** — интро-калы и tracking
 - [ ] **День 11-14** — уроки и расписание

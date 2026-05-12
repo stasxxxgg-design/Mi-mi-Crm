@@ -48,7 +48,9 @@ async function wizard(
       '<b>📝 Редактирование welcome-текста</b>',
       '',
       '<b>Сейчас:</b>',
-      escapeHtml(currentText),
+      // blockquote — чтобы юзер не выделил заголовок и не скопировал его
+      // вместе с текстом при ответе.
+      `<blockquote>${escapeHtml(currentText)}</blockquote>`,
       '',
       `Введи новый текст (до ${MAX_LENGTH} символов) или /cancel для отмены.`,
     ].join('\n'),
