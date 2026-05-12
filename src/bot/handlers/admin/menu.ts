@@ -18,6 +18,7 @@
 import { Composer, InlineKeyboard } from 'grammy';
 import type { BotContext } from '../../types.js';
 import { sendSurveyPanel } from './survey.js';
+import { sendWelcomePanel } from './welcome.js';
 
 const CALLBACK_PREFIX = 'admin_menu:';
 
@@ -49,15 +50,16 @@ export function registerAdminMenuHandlers(composer: Composer<BotContext>): void 
     await ctx.answerCallbackQuery();
 
     const section = data.slice(CALLBACK_PREFIX.length);
+    if (section === 'main') {
+      await sendAdminMenu(ctx);
+      return;
+    }
     if (section === 'survey') {
       await sendSurveyPanel(ctx);
       return;
     }
     if (section === 'welcome') {
-      await ctx.reply(
-        '👋 <b>Приветствие</b>\n\n<i>Тексты приветствия и welcome-кружок Маши — скоро в Day 4B.</i>',
-        { parse_mode: 'HTML' },
-      );
+      await sendWelcomePanel(ctx);
       return;
     }
     if (section === 'leads') {

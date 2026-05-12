@@ -15,6 +15,7 @@ import { registerSurveyAdminHandlers } from './survey.js';
 import { registerAddSurveyConversation } from './survey-add.js';
 import { registerEditSurveyConversation } from './survey-edit.js';
 import { registerReorderSurveyConversation } from './survey-reorder.js';
+import { registerWelcomeAdminHandlers } from './welcome.js';
 import type { BotContext } from '../../types.js';
 
 export function createAdminComposer(): Composer<BotContext> {
@@ -28,6 +29,6 @@ export function createAdminComposer(): Composer<BotContext> {
   // Главное меню (/admin) + callback-роутинг по разделам.
   registerAdminMenuHandlers(composer);
   registerSurveyAdminHandlers(composer);
-  // Day 4B (CMS сценариев, /upload_media, welcome video note, delay-runner) — впереди.
+  registerWelcomeAdminHandlers(composer);
   return composer;
 }
