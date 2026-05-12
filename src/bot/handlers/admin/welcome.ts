@@ -20,6 +20,7 @@
 import { Composer, InlineKeyboard } from 'grammy';
 import { prisma } from '../../../core/db.js';
 import type { BotContext } from '../../types.js';
+import { EDIT_WELCOME_TEXT_CONVERSATION_ID } from './welcome-edit-text.js';
 
 const CALLBACK_PREFIX = 'welcome:';
 
@@ -107,12 +108,10 @@ export function registerWelcomeAdminHandlers(composer: Composer<BotContext>): vo
       return;
     }
     if (action.startsWith('text:')) {
-      // TODO Day 4B Шаг 2: enter conversation для edit текста.
       const stepId = action.slice('text:'.length);
-      await ctx.reply(
-        `📝 Редактирование текста (step <code>${escapeHtml(stepId)}</code>) — Day 4B Шаг 2.`,
-        { parse_mode: 'HTML' },
-      );
+      if (stepId) {
+        await ctx.conversation.enter(EDIT_WELCOME_TEXT_CONVERSATION_ID, stepId);
+      }
       return;
     }
   });
